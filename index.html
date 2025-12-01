@@ -230,8 +230,45 @@
             }, [history, currentDate]);
 
             // --- UI HELPERS ---
-            const exportCSV = () => { /* Mesma lógica anterior */ };
-            const backupData = () => { /* Mesma lógica anterior */ };
+            const exportCSV = () => {
+                if (history.length === 0) return alert("Sem dados.");
+                const headers = "Data,Peso,Gordura%,Musculo%,Torax,Cintura,Abdome,Quadril,Proteina,Carbo,Gordura\n";
+                const rows = history.map(h => {
+                    const m = h.measurements || {};
+                    return `${h.date},${h.weight||''},${h.bodyFat||''},${h.muscle||''},${m.chest||''},${m.waist||''},${m.abdomen||''},${m.hip||''},${h.protein},${h.carbs},${h.fat}`;
+                }).join("\n");
+                const blob = new Blob([headers + rows], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a'); a.href = url; a.download = 'jv_dados.csv'; a.click();
+            };
+
+            const backupData = () => {
+                const blob = new Blob([JSON.stringify({ history, goals })], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a'); a.href = url; a.download = `backup_jv_${currentDate}.json`; a.click();
+            };
+
+            const importBackup = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    try {
+                        const data = JSON.parse(ev.target.result);
+                        if (data.history) {
+                            if (confirm('Sobrescrever tudo com este backup?')) {
+                                setHistory(data.history);
+                                if (data.goals) setGoals(data.goals);
+                                localStorage.setItem('jv_desafio_data', JSON.stringify(data.history));
+                                if (data.goals) localStorage.setItem('jv_goals_config', JSON.stringify(data.goals));
+                                alert('Restaurado!');
+                                window.location.reload();
+                            }
+                        }
+                    } catch (err) { alert('Erro no arquivo'); }
+                };
+                reader.readAsText(file);
+            };
 
             return (
                 <div className="min-h-full pb-20">
@@ -283,17 +320,6 @@
                             <div className="mt-4 h-1.5 bg-slate-950 rounded-full overflow-hidden relative z-10">
                                 <div className={`h-full transition-all duration-700 ${dailyScore>=100?'bg-emerald-500':'bg-blue-500'}`} style={{width: `${dailyScore}%`}}></div>
                             </div>
-                        </div>
-
-                        {/* GRÁFICO (Componente Simplificado para brevidade) */}
-                        <div className="glass rounded-xl p-4">
-                             <div className="flex justify-between items-center mb-4">
-                                <h3 className="text-xs font-bold text-slate-300 uppercase flex items-center gap-2">
-                                    <Icons.TrendingUp className="w-4 h-4 text-emerald-400"/> Evolução
-                                </h3>
-                                <div className="text-[10px] bg-slate-800 px-2 py-1 rounded text-slate-400">Inicio: 92.5kg</div>
-                            </div>
-                            <Charts history={history} />
                         </div>
 
                         {/* ESTATÍSTICAS TREINO (Usando State goals) */}
@@ -368,6 +394,17 @@
                                 ))}
                             </div>
                         </section>
+
+                        {/* GRÁFICO (Moved to bottom) */}
+                        <div className="glass rounded-xl p-4">
+                             <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-xs font-bold text-slate-300 uppercase flex items-center gap-2">
+                                    <Icons.TrendingUp className="w-4 h-4 text-emerald-400"/> Evolução
+                                </h3>
+                                <div className="text-[10px] bg-slate-800 px-2 py-1 rounded text-slate-400">Inicio: 92.5kg</div>
+                            </div>
+                            <Charts history={history} />
+                        </div>
                     </main>
 
                     {/* MODAL EDITOR DE METAS */}
@@ -417,7 +454,21 @@
                         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4" onClick={() => setShowSettings(false)}>
                             <div className="bg-slate-900 border border-slate-800 w-full max-w-sm rounded-3xl p-6 relative slide-up" onClick={e => e.stopPropagation()}>
                                 <h2 className="text-xl font-bold mb-4 text-white">Configurações</h2>
-                                <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="w-full text-red-500 py-3 border border-slate-800 rounded-xl">Resetar Tudo</button>
+                                <div className="space-y-3">
+                                    <button onClick={backupData} className="w-full bg-slate-800 p-3 rounded-xl flex items-center justify-center gap-2 text-sm font-bold text-slate-300">
+                                        <Icons.Download className="w-4 h-4"/> Backup JSON
+                                    </button>
+                                    <label className="w-full bg-slate-800 p-3 rounded-xl flex items-center justify-center gap-2 text-sm font-bold text-slate-300 cursor-pointer">
+                                        <Icons.Upload className="w-4 h-4"/> Restaurar Backup
+                                        <input ref={fileInputRef} type="file" accept=".json" className="hidden" onChange={importBackup} />
+                                    </label>
+                                    <button onClick={exportCSV} className="w-full bg-blue-900/20 border border-blue-900/50 p-3 rounded-xl flex items-center justify-center gap-2 text-sm font-bold text-blue-400">
+                                        <Icons.Activity className="w-4 h-4"/> Exportar CSV
+                                    </button>
+                                    <div className="pt-4 border-t border-slate-800 mt-2">
+                                        <button onClick={() => { if(confirm("Apagar todos os dados locais?")) { localStorage.clear(); window.location.reload(); } }} className="w-full text-red-500 py-2 border border-slate-800 rounded-xl">Resetar Tudo</button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     )}
