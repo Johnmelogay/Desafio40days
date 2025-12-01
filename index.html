@@ -81,9 +81,8 @@
             }
         };
 
-        // NOVAS METAS PADRÃO
         const DEFAULT_GOALS = {
-            protein: 200, carbs: 140, fat: 50,
+            protein: 200, carbs: 140, fat: 50, calories: 1750,
             workoutsPerWeek: 8,
             monthlyWorkouts: 32,
             natacao: 3, crossfit: 2, musculacao: 3
@@ -105,27 +104,24 @@
             const [startDate, setStartDate] = useState(new Date('2025-12-01T00:00:00'));
             const [currentDate, setCurrentDate] = useState(new Date().toISOString().split('T')[0]);
             
-            // Estado de Metas (Carrega do storage ou usa padrão)
             const [goals, setGoals] = useState(() => {
                 const savedGoals = localStorage.getItem('jv_goals_config');
                 return savedGoals ? JSON.parse(savedGoals) : DEFAULT_GOALS;
             });
 
-            // Log Diário
             const [dailyLog, setDailyLog] = useState({
-                protein: 0, carbs: 0, fat: 0, 
+                protein: 0, carbs: 0, fat: 0, extraCalories: 0, // Campo Extra
                 weight: '', bodyFat: '', muscle: '', 
                 sleepHours: '', isRestDay: false, workouts: [],
                 measurements: null
             });
             
-            // Modais e UI
             const [showSettings, setShowSettings] = useState(false);
             const [showMeasurements, setShowMeasurements] = useState(false);
             const [showGoalEditor, setShowGoalEditor] = useState(false);
             const fileInputRef = useRef(null);
 
-            // --- EFEITOS DE CARREGAMENTO ---
+            // --- EFEITOS ---
             useEffect(() => {
                 const savedData = localStorage.getItem('jv_desafio_data');
                 if (savedData) {
@@ -133,7 +129,7 @@
                 } else {
                     const initialLog = {
                         date: '2025-12-01',
-                        protein: 0, carbs: 0, fat: 0,
+                        protein: 0, carbs: 0, fat: 0, extraCalories: 0,
                         weight: JOAO_DATA.weight,
                         bodyFat: JOAO_DATA.bodyFat,
                         muscle: JOAO_DATA.muscle,
@@ -145,20 +141,18 @@
                 }
             }, []);
 
-            // Salvar metas sempre que mudarem
             useEffect(() => {
                 localStorage.setItem('jv_goals_config', JSON.stringify(goals));
             }, [goals]);
 
-            // Sincronizar DailyLog
             useEffect(() => {
                 const log = history.find(h => h.date === currentDate);
                 if (log) {
-                    setDailyLog(log);
+                    setDailyLog({ ...log, extraCalories: log.extraCalories || 0 });
                 } else {
                     const lastLog = history[0]; 
                     setDailyLog({
-                        protein: 0, carbs: 0, fat: 0, 
+                        protein: 0, carbs: 0, fat: 0, extraCalories: 0,
                         weight: lastLog?.weight || '', 
                         bodyFat: lastLog?.bodyFat || '',
                         muscle: lastLog?.muscle || '',
@@ -169,16 +163,14 @@
                 }
             }, [currentDate, history]);
 
-            // --- FUNÇÕES DE DADOS ---
+            // --- SALVAMENTO ---
             const saveData = (newLog) => {
                 const updatedLog = { ...newLog, date: currentDate };
                 setDailyLog(updatedLog);
-
                 let newHistory = [...history];
                 const idx = newHistory.findIndex(h => h.date === currentDate);
                 if (idx >= 0) newHistory[idx] = updatedLog;
                 else newHistory.push(updatedLog);
-
                 newHistory.sort((a, b) => new Date(b.date) - new Date(a.date));
                 setHistory(newHistory);
                 localStorage.setItem('jv_desafio_data', JSON.stringify(newHistory));
@@ -205,6 +197,12 @@
             // --- CÁLCULOS ---
             const getDayNumber = () => Math.floor((new Date(currentDate) - startDate) / 86400000) + 1;
             
+            // Calculo Calorias (4-4-9 rule + Extra)
+            const currentCalories = useMemo(() => {
+                const base = (dailyLog.protein * 4) + (dailyLog.carbs * 4) + (dailyLog.fat * 9);
+                return base + (dailyLog.extraCalories || 0);
+            }, [dailyLog]);
+
             const dailyScore = useMemo(() => {
                 let s = 0;
                 if (dailyLog.workouts?.length > 0) s += 50;
@@ -217,7 +215,6 @@
                 const day = d.getDay();
                 const start = new Date(d); start.setDate(d.getDate() - day); start.setHours(0,0,0,0);
                 const end = new Date(start); end.setDate(start.getDate() + 6); end.setHours(23,59,59,999);
-
                 let stats = { natacao: 0, crossfit: 0, musculacao: 0, total: 0 };
                 history.forEach(h => {
                     const hDate = new Date(h.date + 'T12:00:00');
@@ -232,10 +229,11 @@
             // --- UI HELPERS ---
             const exportCSV = () => {
                 if (history.length === 0) return alert("Sem dados.");
-                const headers = "Data,Peso,Gordura%,Musculo%,Torax,Cintura,Abdome,Quadril,Proteina,Carbo,Gordura\n";
+                const headers = "Data,Peso,Gordura%,Musculo%,Torax,Cintura,Abdome,Quadril,Proteina,Carbo,Gordura,Calorias\n";
                 const rows = history.map(h => {
                     const m = h.measurements || {};
-                    return `${h.date},${h.weight||''},${h.bodyFat||''},${h.muscle||''},${m.chest||''},${m.waist||''},${m.abdomen||''},${m.hip||''},${h.protein},${h.carbs},${h.fat}`;
+                    const cals = (h.protein*4) + (h.carbs*4) + (h.fat*9) + (h.extraCalories || 0);
+                    return `${h.date},${h.weight||''},${h.bodyFat||''},${h.muscle||''},${m.chest||''},${m.waist||''},${m.abdomen||''},${m.hip||''},${h.protein},${h.carbs},${h.fat},${cals}`;
                 }).join("\n");
                 const blob = new Blob([headers + rows], { type: 'text/csv;charset=utf-8;' });
                 const url = URL.createObjectURL(blob);
@@ -256,7 +254,7 @@
                     try {
                         const data = JSON.parse(ev.target.result);
                         if (data.history) {
-                            if (confirm('Sobrescrever tudo com este backup?')) {
+                            if (confirm('Restaurar backup?')) {
                                 setHistory(data.history);
                                 if (data.goals) setGoals(data.goals);
                                 localStorage.setItem('jv_desafio_data', JSON.stringify(data.history));
@@ -284,19 +282,11 @@
                                     <p className="text-xs text-emerald-400 font-bold uppercase mt-0.5">Dia {getDayNumber()}</p>
                                 </div>
                             </div>
-                            
                             <div className="flex gap-2">
-                                {/* Botão Editar Metas */}
-                                <button onClick={() => setShowGoalEditor(true)} className="p-2 bg-slate-800 rounded-full text-blue-400 hover:text-blue-300 transition-colors border border-slate-700/50">
-                                    <Icons.Edit className="w-5 h-5" />
-                                </button>
-                                {/* Botão Configurações */}
-                                <button onClick={() => setShowSettings(true)} className="p-2 bg-slate-800 rounded-full text-slate-400 hover:text-white transition-colors border border-slate-700/50">
-                                    <Icons.Settings className="w-5 h-5" />
-                                </button>
+                                <button onClick={() => setShowGoalEditor(true)} className="p-2 bg-slate-800 rounded-full text-blue-400 border border-slate-700/50"><Icons.Edit className="w-5 h-5" /></button>
+                                <button onClick={() => setShowSettings(true)} className="p-2 bg-slate-800 rounded-full text-slate-400 hover:text-white border border-slate-700/50"><Icons.Settings className="w-5 h-5" /></button>
                             </div>
                         </div>
-                        
                         <div className="flex items-center justify-between bg-slate-800 rounded-lg p-1 border border-slate-700">
                             <button onClick={() => { const d=new Date(currentDate); d.setDate(d.getDate()-1); setCurrentDate(d.toISOString().split('T')[0]); }} className="p-2 text-slate-400"><Icons.ChevronLeft className="w-5 h-5"/></button>
                             <input type="date" value={currentDate} onChange={(e) => setCurrentDate(e.target.value)} className="bg-transparent text-center font-bold text-slate-200 outline-none text-sm" />
@@ -313,16 +303,48 @@
                                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">Performance Diária</p>
                                     <p className="text-4xl font-black text-white">{dailyScore}%</p>
                                 </div>
-                                <div className={`p-3 rounded-xl border ${dailyScore>=100?'bg-emerald-500/20 border-emerald-500/50 text-emerald-400':'bg-slate-800 border-slate-700 text-slate-500'}`}>
-                                    <Icons.Target className="w-6 h-6" />
-                                </div>
+                                <div className={`p-3 rounded-xl border ${dailyScore>=100?'bg-emerald-500/20 border-emerald-500/50 text-emerald-400':'bg-slate-800 border-slate-700 text-slate-500'}`}><Icons.Target className="w-6 h-6" /></div>
                             </div>
                             <div className="mt-4 h-1.5 bg-slate-950 rounded-full overflow-hidden relative z-10">
                                 <div className={`h-full transition-all duration-700 ${dailyScore>=100?'bg-emerald-500':'bg-blue-500'}`} style={{width: `${dailyScore}%`}}></div>
                             </div>
                         </div>
 
-                        {/* ESTATÍSTICAS TREINO (Usando State goals) */}
+                        {/* CALORIAS (Com Input Manual) */}
+                        <div className="glass p-4 rounded-xl">
+                            <div className="flex justify-between items-end mb-2">
+                                <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+                                    <Icons.Flame className="w-4 h-4 text-orange-500" /> Calorias
+                                </h3>
+                                <div className="text-xs font-mono">
+                                    <span className="text-white text-lg font-bold">{Math.round(currentCalories)}</span>
+                                    <span className="text-slate-500">/{goals.calories}</span>
+                                </div>
+                            </div>
+                            <div className="w-full h-3 bg-slate-800 rounded-full overflow-hidden border border-slate-700/50 relative mb-3">
+                                <div className={`h-full transition-all duration-500 ${currentCalories > goals.calories ? 'bg-red-500' : 'bg-orange-500'}`} style={{ width: `${Math.min(100, (currentCalories / goals.calories) * 100)}%` }}/>
+                            </div>
+                            
+                            {/* Input Manual */}
+                            <div className="flex items-center justify-between bg-slate-800/50 p-2 rounded-lg border border-slate-700/50">
+                                <span className="text-[10px] text-slate-400">Ajuste Manual / Extra:</span>
+                                <div className="flex items-center gap-1">
+                                    <input 
+                                        type="number" 
+                                        value={dailyLog.extraCalories === 0 ? '' : dailyLog.extraCalories} 
+                                        onChange={(e) => {
+                                            const val = parseFloat(e.target.value);
+                                            updateField('extraCalories', isNaN(val) ? 0 : val);
+                                        }}
+                                        placeholder="+/-"
+                                        className="bg-transparent text-right font-mono font-bold text-white w-16 outline-none text-xs border-b border-slate-600 focus:border-orange-500"
+                                    />
+                                    <span className="text-[10px] text-slate-500">kcal</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* ESTATÍSTICAS TREINO */}
                         <div className="grid grid-cols-2 gap-3">
                             <StatsBox label="Semana" value={weeklyStats.total} target={goals.workoutsPerWeek} color="blue" />
                             <StatsBox label="Mês (Meta)" value={weeklyStats.total * 4} target={goals.monthlyWorkouts} color="purple" />
@@ -395,7 +417,7 @@
                             </div>
                         </section>
 
-                        {/* GRÁFICO (Moved to bottom) */}
+                        {/* GRÁFICO (NO FINAL) */}
                         <div className="glass rounded-xl p-4">
                              <div className="flex justify-between items-center mb-4">
                                 <h3 className="text-xs font-bold text-slate-300 uppercase flex items-center gap-2">
@@ -407,7 +429,7 @@
                         </div>
                     </main>
 
-                    {/* MODAL EDITOR DE METAS */}
+                    {/* MODAL EDITOR DE METAS (Com Calorias) */}
                     {showGoalEditor && (
                         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4" onClick={() => setShowGoalEditor(false)}>
                             <div className="bg-slate-900 border border-slate-800 w-full max-w-sm rounded-3xl p-6 relative slide-up h-auto max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
@@ -415,23 +437,22 @@
                                     <h2 className="text-xl font-bold text-white flex items-center gap-2"><Icons.Edit className="w-5 h-5 text-blue-400"/> Editar Metas</h2>
                                     <button onClick={() => setShowGoalEditor(false)} className="text-sm text-slate-400">Fechar</button>
                                 </div>
-                                
                                 <div className="space-y-6">
-                                    {/* Nutrição */}
                                     <div>
                                         <h3 className="text-xs font-bold text-emerald-400 uppercase mb-3 border-b border-slate-800 pb-1">Nutrição Diária (g)</h3>
-                                        <div className="grid grid-cols-3 gap-3">
+                                        <div className="grid grid-cols-3 gap-3 mb-3">
                                             <GoalInput label="Proteína" val={goals.protein} change={v => setGoals({...goals, protein: parseFloat(v)})} />
                                             <GoalInput label="Carbo" val={goals.carbs} change={v => setGoals({...goals, carbs: parseFloat(v)})} />
                                             <GoalInput label="Gordura" val={goals.fat} change={v => setGoals({...goals, fat: parseFloat(v)})} />
                                         </div>
+                                        <div className="grid grid-cols-1">
+                                            <GoalInput label="Limite de Calorias (kcal)" val={goals.calories} change={v => setGoals({...goals, calories: parseFloat(v)})} />
+                                        </div>
                                     </div>
-
-                                    {/* Treinos Semanais */}
                                     <div>
-                                        <h3 className="text-xs font-bold text-blue-400 uppercase mb-3 border-b border-slate-800 pb-1">Treinos / Semana</h3>
+                                        <h3 className="text-xs font-bold text-blue-400 uppercase mb-3 border-b border-slate-800 pb-1">Treinos</h3>
                                         <div className="grid grid-cols-2 gap-3 mb-3">
-                                            <GoalInput label="Meta Total" val={goals.workoutsPerWeek} change={v => setGoals({...goals, workoutsPerWeek: parseFloat(v)})} />
+                                            <GoalInput label="Meta Semanal" val={goals.workoutsPerWeek} change={v => setGoals({...goals, workoutsPerWeek: parseFloat(v)})} />
                                             <GoalInput label="Meta Mensal" val={goals.monthlyWorkouts} change={v => setGoals({...goals, monthlyWorkouts: parseFloat(v)})} />
                                         </div>
                                         <div className="grid grid-cols-3 gap-3">
@@ -440,7 +461,6 @@
                                             <GoalInput label="Musculação" val={goals.musculacao} change={v => setGoals({...goals, musculacao: parseFloat(v)})} />
                                         </div>
                                     </div>
-                                    
                                     <button onClick={() => setShowGoalEditor(false)} className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2">
                                         <Icons.Save className="w-4 h-4"/> Salvar Alterações
                                     </button>
@@ -449,38 +469,26 @@
                         </div>
                     )}
 
-                    {/* MODAL SETTINGS (Mantido simples) */}
+                    {/* MODAL SETTINGS */}
                     {showSettings && (
                         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4" onClick={() => setShowSettings(false)}>
                             <div className="bg-slate-900 border border-slate-800 w-full max-w-sm rounded-3xl p-6 relative slide-up" onClick={e => e.stopPropagation()}>
                                 <h2 className="text-xl font-bold mb-4 text-white">Configurações</h2>
                                 <div className="space-y-3">
-                                    <button onClick={backupData} className="w-full bg-slate-800 p-3 rounded-xl flex items-center justify-center gap-2 text-sm font-bold text-slate-300">
-                                        <Icons.Download className="w-4 h-4"/> Backup JSON
-                                    </button>
-                                    <label className="w-full bg-slate-800 p-3 rounded-xl flex items-center justify-center gap-2 text-sm font-bold text-slate-300 cursor-pointer">
-                                        <Icons.Upload className="w-4 h-4"/> Restaurar Backup
-                                        <input ref={fileInputRef} type="file" accept=".json" className="hidden" onChange={importBackup} />
-                                    </label>
-                                    <button onClick={exportCSV} className="w-full bg-blue-900/20 border border-blue-900/50 p-3 rounded-xl flex items-center justify-center gap-2 text-sm font-bold text-blue-400">
-                                        <Icons.Activity className="w-4 h-4"/> Exportar CSV
-                                    </button>
-                                    <div className="pt-4 border-t border-slate-800 mt-2">
-                                        <button onClick={() => { if(confirm("Apagar todos os dados locais?")) { localStorage.clear(); window.location.reload(); } }} className="w-full text-red-500 py-2 border border-slate-800 rounded-xl">Resetar Tudo</button>
-                                    </div>
+                                    <button onClick={backupData} className="w-full bg-slate-800 p-3 rounded-xl flex items-center justify-center gap-2 text-sm font-bold text-slate-300"><Icons.Download className="w-4 h-4"/> Backup JSON</button>
+                                    <label className="w-full bg-slate-800 p-3 rounded-xl flex items-center justify-center gap-2 text-sm font-bold text-slate-300 cursor-pointer"><Icons.Upload className="w-4 h-4"/> Restaurar Backup<input ref={fileInputRef} type="file" accept=".json" className="hidden" onChange={importBackup} /></label>
+                                    <button onClick={exportCSV} className="w-full bg-blue-900/20 border border-blue-900/50 p-3 rounded-xl flex items-center justify-center gap-2 text-sm font-bold text-blue-400"><Icons.Activity className="w-4 h-4"/> Exportar CSV</button>
+                                    <div className="pt-4 border-t border-slate-800 mt-2"><button onClick={() => { if(confirm("Apagar todos os dados locais?")) { localStorage.clear(); window.location.reload(); } }} className="w-full text-red-500 py-2 border border-slate-800 rounded-xl">Resetar Tudo</button></div>
                                 </div>
                             </div>
                         </div>
                     )}
                     
-                    {/* MODAL MEDIDAS (Reutilizado mas oculto no exemplo para brevidade, lógica já existe) */}
+                    {/* MODAL MEDIDAS */}
                      {showMeasurements && (
                         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-sm p-4" onClick={() => setShowMeasurements(false)}>
                             <div className="bg-slate-900 border border-slate-800 w-full max-w-sm rounded-3xl p-6 relative slide-up h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-                                <div className="flex justify-between items-center mb-6">
-                                    <h2 className="text-xl font-bold text-white flex items-center gap-2"><Icons.Ruler className="w-5 h-5"/> Medidas</h2>
-                                    <button onClick={() => setShowMeasurements(false)} className="text-sm text-slate-400">Fechar</button>
-                                </div>
+                                <div className="flex justify-between items-center mb-6"><h2 className="text-xl font-bold text-white flex items-center gap-2"><Icons.Ruler className="w-5 h-5"/> Medidas</h2><button onClick={() => setShowMeasurements(false)} className="text-sm text-slate-400">Fechar</button></div>
                                 <div className="space-y-6">
                                     <div><h3 className="text-xs font-bold text-slate-500 uppercase mb-3 border-b border-slate-800 pb-1">Tronco</h3><div className="grid grid-cols-2 gap-4"><MeasureInput label="Tórax" mKey="chest" val={dailyLog.measurements?.chest} update={updateMeasurement} /><MeasureInput label="Cintura" mKey="waist" val={dailyLog.measurements?.waist} update={updateMeasurement} /><MeasureInput label="Abdome" mKey="abdomen" val={dailyLog.measurements?.abdomen} update={updateMeasurement} /><MeasureInput label="Quadril" mKey="hip" val={dailyLog.measurements?.hip} update={updateMeasurement} /></div></div>
                                     <div><h3 className="text-xs font-bold text-slate-500 uppercase mb-3 border-b border-slate-800 pb-1">Membros Sup.</h3><div className="grid grid-cols-2 gap-4"><MeasureInput label="Braço E." mKey="armL" val={dailyLog.measurements?.armL} update={updateMeasurement} /><MeasureInput label="Braço D." mKey="armR" val={dailyLog.measurements?.armR} update={updateMeasurement} /><MeasureInput label="Antebr. E." mKey="forearmL" val={dailyLog.measurements?.forearmL} update={updateMeasurement} /><MeasureInput label="Antebr. D." mKey="forearmR" val={dailyLog.measurements?.forearmR} update={updateMeasurement} /></div></div>
@@ -495,41 +503,10 @@
         }
 
         // --- SUBCOMPONENTES ---
-        function GoalInput({ label, val, change }) {
-            return (
-                <div className="bg-slate-800 p-2 rounded-lg border border-slate-700">
-                    <label className="text-[10px] text-slate-400 block mb-1">{label}</label>
-                    <input type="number" value={val} onChange={(e) => change(e.target.value)} className="bg-transparent text-lg font-bold text-white w-full outline-none" />
-                </div>
-            );
-        }
-        function QuickInput({ label, val, change, color="text-white" }) {
-            return (
-                <div className="flex flex-col items-center p-2 bg-slate-900 rounded-lg border border-slate-800">
-                    <span className="text-[10px] text-slate-500 mb-1">{label}</span>
-                    <input type="number" value={val} onChange={(e) => change(e.target.value)} className={`bg-transparent text-center font-bold w-full outline-none ${color}`} placeholder="-" />
-                </div>
-            );
-        }
-        function MeasureInput({ label, mKey, val, update }) {
-            return (
-                <div className="bg-slate-800 p-2 rounded-lg border border-slate-700">
-                    <label className="text-[10px] text-slate-400 block mb-1">{label}</label>
-                    <div className="flex items-center gap-1"><input type="number" value={val || ''} onChange={(e) => update(mKey, e.target.value)} className="bg-transparent text-lg font-bold text-white w-full outline-none" placeholder="-" /><span className="text-[10px] text-slate-600">cm</span></div>
-                </div>
-            );
-        }
-        function StatsBox({ label, value, target, color }) {
-            const colors = { blue: 'bg-blue-500', purple: 'bg-purple-500' };
-            const pct = Math.min(100, (value/target)*100);
-            return (
-                <div className="glass p-3 rounded-xl">
-                    <div className="text-[10px] text-slate-400 uppercase font-bold mb-2">{label}</div>
-                    <div className="flex items-end gap-1 mb-1"><span className="text-xl font-bold text-white">{value}</span><span className="text-xs text-slate-600">/{target}</span></div>
-                    <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden"><div className={`h-full ${colors[color]}`} style={{width: `${pct}%`}}></div></div>
-                </div>
-            );
-        }
+        function GoalInput({ label, val, change }) { return (<div className="bg-slate-800 p-2 rounded-lg border border-slate-700"><label className="text-[10px] text-slate-400 block mb-1">{label}</label><input type="number" value={val} onChange={(e) => change(e.target.value)} className="bg-transparent text-lg font-bold text-white w-full outline-none" /></div>); }
+        function QuickInput({ label, val, change, color="text-white" }) { return (<div className="flex flex-col items-center p-2 bg-slate-900 rounded-lg border border-slate-800"><span className="text-[10px] text-slate-500 mb-1">{label}</span><input type="number" value={val} onChange={(e) => change(e.target.value)} className={`bg-transparent text-center font-bold w-full outline-none ${color}`} placeholder="-" /></div>); }
+        function MeasureInput({ label, mKey, val, update }) { return (<div className="bg-slate-800 p-2 rounded-lg border border-slate-700"><label className="text-[10px] text-slate-400 block mb-1">{label}</label><div className="flex items-center gap-1"><input type="number" value={val || ''} onChange={(e) => update(mKey, e.target.value)} className="bg-transparent text-lg font-bold text-white w-full outline-none" placeholder="-" /><span className="text-[10px] text-slate-600">cm</span></div></div>); }
+        function StatsBox({ label, value, target, color }) { const colors = { blue: 'bg-blue-500', purple: 'bg-purple-500' }; const pct = Math.min(100, (value/target)*100); return (<div className="glass p-3 rounded-xl"><div className="text-[10px] text-slate-400 uppercase font-bold mb-2">{label}</div><div className="flex items-end gap-1 mb-1"><span className="text-xl font-bold text-white">{value}</span><span className="text-xs text-slate-600">/{target}</span></div><div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden"><div className={`h-full ${colors[color]}`} style={{width: `${pct}%`}}></div></div></div>); }
         function Charts({ history }) {
             const data = history.filter(h => h.weight).slice(0, 14).reverse();
             if (data.length < 2) return <div className="h-20 flex items-center justify-center text-xs text-slate-600">Sem dados suficientes</div>;
@@ -540,47 +517,16 @@
                 const y = 100 - ((d.weight - min) / (max - min)) * 100;
                 return `${x},${y}`;
             }).join(" ");
-            return (
-                <div className="h-24 w-full relative">
-                    <svg className="w-full h-full overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="none">
-                        <polyline points={points} fill="none" stroke="#10b981" strokeWidth="2" vectorEffect="non-scaling-stroke"/>
-                        {data.map((d, i) => <circle key={i} cx={(i/(data.length-1))*100} cy={100 - ((d.weight-min)/(max-min))*100} r="3" className="fill-slate-900 stroke-emerald-500" strokeWidth="2" vectorEffect="non-scaling-stroke" />)}
-                    </svg>
-                </div>
-            );
+            return (<div className="h-24 w-full relative"><svg className="w-full h-full overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="none"><polyline points={points} fill="none" stroke="#10b981" strokeWidth="2" vectorEffect="non-scaling-stroke"/>{data.map((d, i) => <circle key={i} cx={(i/(data.length-1))*100} cy={100 - ((d.weight-min)/(max-min))*100} r="3" className="fill-slate-900 stroke-emerald-500" strokeWidth="2" vectorEffect="non-scaling-stroke" />)}</svg></div>);
         }
         function WorkoutCard({ title, icon, current, target, active, onClick, color }) {
-            const themes = {
-                cyan: { bg: 'bg-cyan-500/10', border: 'border-cyan-500/40', text: 'text-cyan-400', bar: 'bg-cyan-500' },
-                orange: { bg: 'bg-orange-500/10', border: 'border-orange-500/40', text: 'text-orange-400', bar: 'bg-orange-500' },
-                purple: { bg: 'bg-purple-500/10', border: 'border-purple-500/40', text: 'text-purple-400', bar: 'bg-purple-500' }
-            };
-            const t = themes[color];
-            const pct = Math.min(100, (current/target)*100);
-            return (
-                <button onClick={onClick} className={`relative p-3 rounded-xl border flex flex-col items-center justify-between min-h-[100px] transition-all active:scale-95 ${active ? `${t.bg} ${t.border}` : 'bg-slate-800 border-slate-700'}`}>
-                    <div className={`p-1.5 rounded-full mb-1 ${active ? 'bg-white/10 text-white' : 'bg-slate-700/50 text-slate-400'}`}><div className={`w-4 h-4 ${active ? t.text : ''}`}>{icon}</div></div>
-                    <div className="text-center w-full z-10"><span className={`text-[10px] font-bold block uppercase tracking-wide ${active ? 'text-white' : 'text-slate-400'}`}>{title}</span><span className="text-[10px] text-slate-500 font-mono">{current}/{target}</span></div>
-                    <div className="w-full h-1 bg-black/30 rounded-full mt-2 overflow-hidden"><div className={`h-full transition-all ${active ? t.bar : 'bg-slate-600'}`} style={{width: `${pct}%`}}></div></div>
-                </button>
-            );
+            const themes = { cyan: { bg: 'bg-cyan-500/10', border: 'border-cyan-500/40', text: 'text-cyan-400', bar: 'bg-cyan-500' }, orange: { bg: 'bg-orange-500/10', border: 'border-orange-500/40', text: 'text-orange-400', bar: 'bg-orange-500' }, purple: { bg: 'bg-purple-500/10', border: 'border-purple-500/40', text: 'text-purple-400', bar: 'bg-purple-500' } };
+            const t = themes[color]; const pct = Math.min(100, (current/target)*100);
+            return (<button onClick={onClick} className={`relative p-3 rounded-xl border flex flex-col items-center justify-between min-h-[100px] transition-all active:scale-95 ${active ? `${t.bg} ${t.border}` : 'bg-slate-800 border-slate-700'}`}><div className={`p-1.5 rounded-full mb-1 ${active ? 'bg-white/10 text-white' : 'bg-slate-700/50 text-slate-400'}`}><div className={`w-4 h-4 ${active ? t.text : ''}`}>{icon}</div></div><div className="text-center w-full z-10"><span className={`text-[10px] font-bold block uppercase tracking-wide ${active ? 'text-white' : 'text-slate-400'}`}>{title}</span><span className="text-[10px] text-slate-500 font-mono">{current}/{target}</span></div><div className="w-full h-1 bg-black/30 rounded-full mt-2 overflow-hidden"><div className={`h-full transition-all ${active ? t.bar : 'bg-slate-600'}`} style={{width: `${pct}%`}}></div></div></button>);
         }
         function MacroRow({ label, type, val, target, color, text, update }) {
             const pct = Math.min(100, (val/target)*100);
-            return (
-                <div>
-                    <div className="flex justify-between items-end mb-2">
-                        <span className="text-xs font-bold text-slate-300">{label}</span>
-                        <div className="flex items-center gap-1"><input type="number" value={val === 0 ? '' : val} onChange={(e) => update(type, e.target.value, true)} className={`bg-transparent text-right font-mono font-bold w-12 outline-none border-b border-dashed border-slate-700 focus:border-white ${text}`} placeholder="0" /><span className="text-xs text-slate-500 font-mono">/{target}g</span></div>
-                    </div>
-                    <div className="h-2 bg-slate-900 rounded-full overflow-hidden mb-2 border border-slate-700/50"><div className={`h-full ${color} transition-all duration-500`} style={{width: `${pct}%`}}></div></div>
-                    <div className="flex justify-end gap-2">
-                        <button onClick={() => update(type, -10)} className="h-6 px-2 bg-slate-800 rounded border border-slate-700 text-[10px] text-slate-400 hover:text-red-400">-10</button>
-                        <button onClick={() => update(type, 10)} className="h-6 px-3 bg-slate-800 rounded border border-slate-600 text-[10px] text-white font-bold hover:bg-slate-700">+10</button>
-                        <button onClick={() => update(type, 30)} className="h-6 px-3 bg-slate-800 rounded border border-slate-600 text-[10px] text-white font-bold hover:bg-slate-700">+30</button>
-                    </div>
-                </div>
-            );
+            return (<div><div className="flex justify-between items-end mb-2"><span className="text-xs font-bold text-slate-300">{label}</span><div className="flex items-center gap-1"><input type="number" value={val === 0 ? '' : val} onChange={(e) => update(type, e.target.value, true)} className={`bg-transparent text-right font-mono font-bold w-12 outline-none border-b border-dashed border-slate-700 focus:border-white ${text}`} placeholder="0" /><span className="text-xs text-slate-500 font-mono">/{target}g</span></div></div><div className="h-2 bg-slate-900 rounded-full overflow-hidden mb-2 border border-slate-700/50"><div className={`h-full ${color} transition-all duration-500`} style={{width: `${pct}%`}}></div></div><div className="flex justify-end gap-2"><button onClick={() => update(type, -10)} className="h-6 px-2 bg-slate-800 rounded border border-slate-700 text-[10px] text-slate-400 hover:text-red-400">-10</button><button onClick={() => update(type, 10)} className="h-6 px-3 bg-slate-800 rounded border border-slate-600 text-[10px] text-white font-bold hover:bg-slate-700">+10</button><button onClick={() => update(type, 30)} className="h-6 px-3 bg-slate-800 rounded border border-slate-600 text-[10px] text-white font-bold hover:bg-slate-700">+30</button></div></div>);
         }
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
